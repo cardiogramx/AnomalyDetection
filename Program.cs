@@ -7,80 +7,94 @@ namespace AnomalyDetection
 {
     class Program
     {
-        // <SnippetDeclareGlobalVariables>
+        private static readonly string BaseModelsRelativePath = @"../../../MLModels";
+
+        private static string SpikePath = GetAbsolutePath($"{BaseModelsRelativePath}/SpikeModel.zip");
+        private static string ChangePointPath = GetAbsolutePath($"{BaseModelsRelativePath}/ChangepointModel.zip");
+
         static readonly string _dataPath = Path.Combine(Environment.CurrentDirectory, "Data", "blob.csv");
+
         //assign the Number of records in dataset file to constant variable
         const int _docsize = 36;
-        // </SnippetDeclareGlobalVariables>
+
         static void Main(string[] args)
         {
             Console.Clear();
+
             // Create MLContext to be shared across the model creation workflow objects
-            // <SnippetCreateMLContext>
             MLContext mlContext = new MLContext();
-            // </SnippetCreateMLContext>
 
             //STEP 1: Common data loading configuration
-            // <SnippetLoadData>
-            IDataView dataView = mlContext.Data.LoadFromTextFile<PredictionInput>(path: _dataPath, hasHeader: true, separatorChar: ',');
-            // </SnippetLoadData>
+
+            IDataView dataView = mlContext.Data.LoadFromTextFile<AnomalyInput>(path: _dataPath, hasHeader: true, separatorChar: ',');
 
             // Spike detects pattern temporary changes
-            // <SnippetCallDetectSpike>
+
             DetectSpike(mlContext, _docsize, dataView);
-            // </SnippetCallDetectSpike>
 
             // Changepoint detects pattern persistent changes
-            // <SnippetCallDetectChangepoint>
+
             DetectChangepoint(mlContext, _docsize, dataView);
-            // </SnippetCallDetectChangepoint>
 
             Console.ReadKey();
         }
+
         static void DetectSpike(MLContext mlContext, int docSize, IDataView productSales)
         {
             Console.WriteLine("Detect temporary changes in pattern");
 
             // STEP 2: Set the training algorithm
-            // <SnippetAddSpikeTrainer>
-            var iidSpikeEstimator = mlContext.Transforms.DetectIidSpike(outputColumnName: nameof(PredictionOutput.Prediction), inputColumnName: nameof(PredictionInput.Y), confidence: 95, pvalueHistoryLength: docSize / 4);
-            // </SnippetAddSpikeTrainer>
+
+            // SnippetAddSpikeTrainer
+
+            var iidSpikeEstimator = mlContext.Transforms.DetectIidSpike(outputColumnName: nameof(AnomalyOutput.Value), inputColumnName: nameof(AnomalyInput.Value), confidence: 95.0, pvalueHistoryLength: docSize / 4);
 
             // STEP 3: Create the transform
             // Create the spike detection transform
+
             Console.WriteLine("=============== Training the model ===============");
-            // <SnippetTrainModel1>
-            ITransformer iidSpikeTransform = iidSpikeEstimator.Fit(CreateEmptyDataView(mlContext));
-            // </SnippetTrainModel1>
+
+            // SnippetTrainModel1
+
+            ITransformer trainedModel = iidSpikeEstimator.Fit(CreateEmptyDataView(mlContext));
 
             Console.WriteLine("=============== End of training process ===============");
+
             //Apply data transformation to create predictions.
-            // <SnippetTransformData1>
-            IDataView transformedData = iidSpikeTransform.Transform(productSales);
-            // </SnippetTransformData1>
 
-            // <SnippetCreateEnumerable1>
-            var predictions = mlContext.Data.CreateEnumerable<PredictionOutput>(transformedData, reuseRowObject: false);
-            // </SnippetCreateEnumerable1>
+            // SnippetTransformData1
 
-            // <SnippetDisplayHeader1>
+            IDataView transformedData = trainedModel.Transform(productSales);
+
+            // SnippetCreateEnumerable1
+
+            var predictions = mlContext.Data.CreateEnumerable<AnomalyOutput>(transformedData, reuseRowObject: false);
+
+            // Save model in file
+
+            mlContext.Model.Save(trainedModel, productSales.Schema, SpikePath);
+
+            // DisplayHeader1
             Console.WriteLine("Alert\tScore\tP-Value");
-            // </SnippetDisplayHeader1>
 
-            // <SnippetDisplayResults1>
+            // DisplayResults1
+
+            int position = 0;
+
             foreach (var p in predictions)
             {
-                var results = $"{p.Prediction[0]}\t{p.Prediction[1]:f2}\t{p.Prediction[2]:F2}";
+                var results = $"{p.Value[0]}\t{p.Value[1]:f2}\t{p.Value[2]:F2}";
 
-                if (p.Prediction[0] == 1)
+                if (p.Value[0] == 1)
                 {
-                    results += " <-- Spike detected";
+                    results += $" <-- Spike detected at position {position}";
                 }
 
                 Console.WriteLine(results);
+
+                position++;
             }
             Console.WriteLine("");
-            // </SnippetDisplayResults1>
         }
 
         static void DetectChangepoint(MLContext mlContext, int docSize, IDataView productSales)
@@ -88,38 +102,42 @@ namespace AnomalyDetection
             Console.WriteLine("Detect Persistent changes in pattern");
 
             //STEP 2: Set the training algorithm
-            // <SnippetAddChangePointTrainer>
-            var iidChangePointEstimator = mlContext.Transforms.DetectIidChangePoint(outputColumnName: nameof(PredictionOutput.Prediction), inputColumnName: nameof(PredictionInput.Y), confidence: 95, changeHistoryLength: docSize / 4);
-            // </SnippetAddChangePointTrainer>
+
+            var iidChangePointEstimator = mlContext.Transforms.DetectIidChangePoint(outputColumnName: nameof(AnomalyOutput.Value), inputColumnName: nameof(AnomalyInput.Value), confidence: 95.0, changeHistoryLength: docSize / 4);
 
             //STEP 3: Create the transform
+
             Console.WriteLine("=============== Training the model Using Change Point Detection Algorithm===============");
-            // <SnippetTrainModel2>
-            var iidChangePointTransform = iidChangePointEstimator.Fit(CreateEmptyDataView(mlContext));
-            // </SnippetTrainModel2>
+
+            // TrainModel2
+
+            ITransformer trainedModel = iidChangePointEstimator.Fit(CreateEmptyDataView(mlContext));
+
             Console.WriteLine("=============== End of training process ===============");
 
             //Apply data transformation to create predictions.
-            // <SnippetTransformData2>
-            IDataView transformedData = iidChangePointTransform.Transform(productSales);
-            // </SnippetTransformData2>
 
-            // <SnippetCreateEnumerable2>
-            var predictions = mlContext.Data.CreateEnumerable<PredictionOutput>(transformedData, reuseRowObject: false);
-            // </SnippetCreateEnumerable2>
+            // TransformData2
 
-            // <SnippetDisplayHeader2>
+            IDataView transformedData = trainedModel.Transform(productSales);
+
+            // CreateEnumerable2
+
+            var predictions = mlContext.Data.CreateEnumerable<AnomalyOutput>(transformedData, reuseRowObject: false);
+
+            // DisplayHeader2
             Console.WriteLine("Alert\tScore\tP-Value\tMartingale value");
-            // </SnippetDisplayHeader2>
+
+            mlContext.Model.Save(trainedModel, productSales.Schema, ChangePointPath);
 
             int position = 0;
 
-            // <SnippetDisplayResults2>
+            // DisplayResults2
             foreach (var p in predictions)
             {
-                var results = $"{p.Prediction[0]}\t{p.Prediction[1]:f2}\t{p.Prediction[2]:F2}\t{p.Prediction[3]:F2}";
+                var results = $"{p.Value[0]}\t{p.Value[1]:f2}\t{p.Value[2]:F2}\t{p.Value[3]:F2}";
 
-                if (p.Prediction[0] == 1)
+                if (p.Value[0] == 1)
                 {
                     results += $" <-- alert is on, predicted changepoint at position {position}";
                 }
@@ -128,18 +146,25 @@ namespace AnomalyDetection
 
                 position++;
             }
-            Console.WriteLine("");
 
-            // </SnippetDisplayResults2>
+            Console.WriteLine("");
         }
 
-        // <SnippetCreateEmptyDataView>
         static IDataView CreateEmptyDataView(MLContext mlContext)
         {
             // Create empty DataView. We just need the schema to call Fit() for the time series transforms
-            IEnumerable<PredictionInput> enumerableData = new List<PredictionInput>();
+            IEnumerable<AnomalyInput> enumerableData = new List<AnomalyInput>();
             return mlContext.Data.LoadFromEnumerable(enumerableData);
         }
-        // </SnippetCreateEmptyDataView>
+
+        public static string GetAbsolutePath(string relativePath)
+        {
+            FileInfo _dataRoot = new FileInfo(typeof(Program).Assembly.Location);
+            string assemblyFolderPath = _dataRoot.Directory.FullName;
+
+            string fullPath = Path.Combine(assemblyFolderPath, relativePath);
+
+            return fullPath;
+        }
     }
 }
